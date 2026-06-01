@@ -1,0 +1,252 @@
+const express = require('express');
+const multer = require('multer');
+const pdfParse = require('pdf-parse/lib/pdf-parse.js');
+const { parse } = require('csv-parse/sync');
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+const upload = multer({ storage: multer.memoryStorage() });
+
+app.use(express.static(path.join(__dirname, 'public')));
+
+function getAutoInterval(amount) {
+  if (amount < 100) return 10;
+  if (amount < 1000) return 50;
+  return 100;
+}
+
+function roundUp(amount, rule) {
+  const nearest = rule === 'auto' ? getAutoInterval(amount) : (parseInt(rule) || 10);
+  const remainder = amount % nearest;
+  return nearest - remainder;
+}
+
+function detectBank(text) {
+  if (/axis bank|UTIB|Statement of Axis/i.test(text)) return 'axis';
+  if (/HDFC BANK|HDFC Bank Ltd/i.test(text)) return 'hdfc';
+  if (/ICICI Bank/i.test(text)) return 'icici';
+  if (/State Bank of India|SBI/i.test(text)) return 'sbi';
+  if (/Kotak Mahindra/i.test(text)) return 'kotak';
+  return 'generic';
+}
+
+// Axis Bank: columns are Debit | Credit | Balance, no Dr/Cr labels.
+// Each transaction ends with: "txAmount   newBalance3digitBranch"
+// Debit = balance decreased, Credit = balance increased.
+function parseAxisBank(text) {
+  const transactions = [];
+  const lines = text.split('\n');
+
+  const openingMatch = text.match(/OPENING BALANCE\s+([\d,]+\.\d{2})/);
+  let prevBalance = openingMatch ? parseFloat(openingMatch[1].replace(/,/g, '')) : null;
+
+  // Matches line ending with: amount   balance followed by 3-digit branch code
+  // Axis Bank omits comma-formatting in amounts, so use [\d,]+ to handle both
+  const txEndPattern = /([\d,]+\.\d{2})\s{2,}([\d,]+\.\d{2})(\d{3})\s*$/;
+
+  let descLines = [];
+  let inTransactions = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const match = trimmed.match(txEndPattern);
+
+    // Start tracking once we hit the first date line
+    if (!inTransactions && /\d{2}-\d{2}-\d{4}/.test(trimmed)) {
+      inTransactions = true;
+      descLines = [];
+    }
+
+    if (!inTransactions) continue;
+
+    if (match) {
+      const txAmount = parseFloat(match[1].replace(/,/g, ''));
+      const newBalance = parseFloat(match[2].replace(/,/g, ''));
+
+      const isDebit = prevBalance !== null && Math.abs((prevBalance - newBalance) - txAmount) < 0.5;
+
+      if (isDebit && txAmount > 0 && txAmount < 500000) {
+        const desc = descLines.filter(l => l && !/^\d{2}-\d{2}-\d{4}$/.test(l) && l !== 'Br').join(' ');
+        transactions.push({ amount: txAmount, line: (desc || trimmed).substring(0, 80) });
+      }
+
+      prevBalance = newBalance;
+      descLines = [];
+    } else {
+      // Reset desc on a new date line so each transaction gets a clean description
+      if (/^\d{2}-\d{2}-\d{4}$/.test(trimmed)) {
+        descLines = [];
+      } else {
+        descLines.push(trimmed);
+      }
+    }
+  }
+
+  return transactions;
+}
+
+// Generic: look for Dr/DR labels or explicit Debit columns
+function parseGeneric(text) {
+  const lines = text.split('\n');
+  const transactions = [];
+
+  const debitPatterns = [
+    /(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:Dr|DR|dr)\b/,
+    /(?:Debit|DEBIT)\s+([\d,]+\.\d{2})/,
+  ];
+
+  for (const line of lines) {
+    const cleaned = line.trim();
+    if (!cleaned) continue;
+    if (/^(date|narration|description|balance|opening|closing|statement)\b/i.test(cleaned)) continue;
+
+    for (const pattern of debitPatterns) {
+      const match = cleaned.match(pattern);
+      if (match) {
+        const amount = parseFloat(match[1].replace(/,/g, ''));
+        if (amount > 0 && amount < 500000) {
+          transactions.push({ amount, line: cleaned.substring(0, 80) });
+          break;
+        }
+      }
+    }
+  }
+
+  return transactions;
+}
+
+function extractAmountsFromText(text) {
+  const bank = detectBank(text);
+  if (bank === 'axis') return parseAxisBank(text);
+  // HDFC and ICICI also use Dr/Cr labels — generic handles them
+  return parseGeneric(text);
+}
+
+function parseCSV(buffer) {
+  const text = buffer.toString('utf8');
+  let records;
+  try {
+    records = parse(text, { skip_empty_lines: true, trim: true });
+  } catch {
+    return [];
+  }
+
+  if (records.length < 2) return [];
+
+  const headers = records[0].map(h => h.toLowerCase().trim());
+  const transactions = [];
+
+  // Find debit/withdrawal/amount column
+  const debitIdx = headers.findIndex(h =>
+    /debit|withdrawal|dr amount|spent|expense/i.test(h)
+  );
+  const descIdx = headers.findIndex(h =>
+    /narration|description|particular|remarks|details/i.test(h)
+  );
+  const amountIdx = headers.findIndex(h => /^amount$/i.test(h));
+
+  for (let i = 1; i < records.length; i++) {
+    const row = records[i];
+    let amount = null;
+    let description = descIdx >= 0 ? (row[descIdx] || '') : '';
+
+    if (debitIdx >= 0 && row[debitIdx]) {
+      const val = parseFloat(row[debitIdx].replace(/[,₹\s]/g, ''));
+      if (!isNaN(val) && val > 0) amount = val;
+    } else if (amountIdx >= 0 && row[amountIdx]) {
+      // Check if there's a type column indicating debit
+      const typeIdx = headers.findIndex(h => /type|cr\/dr|dr\/cr/i.test(h));
+      if (typeIdx >= 0 && /dr|debit/i.test(row[typeIdx] || '')) {
+        const val = parseFloat(row[amountIdx].replace(/[,₹\s]/g, ''));
+        if (!isNaN(val) && val > 0) amount = val;
+      } else if (typeIdx < 0) {
+        const val = parseFloat(row[amountIdx].replace(/[,₹\s]/g, ''));
+        if (!isNaN(val) && val > 0) amount = val;
+      }
+    }
+
+    if (amount && amount < 500000) {
+      transactions.push({ amount, line: description.substring(0, 80) || `Row ${i}` });
+    }
+  }
+
+  return transactions;
+}
+
+function calculateRoundUps(transactions, rule) {
+  return transactions.map(t => {
+    const interval = rule === 'auto' ? getAutoInterval(t.amount) : parseInt(rule);
+    return { ...t, roundUp: roundUp(t.amount, rule), interval };
+  });
+}
+
+app.post('/analyze', upload.single('statement'), async (req, res) => {
+  try {
+    const file = req.file;
+    const rule = req.body.rule || '10';
+
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+    let transactions = [];
+    const ext = file.originalname.toLowerCase();
+
+    if (ext.endsWith('.pdf')) {
+      const data = await pdfParse(file.buffer);
+      transactions = extractAmountsFromText(data.text);
+    } else if (ext.endsWith('.csv')) {
+      transactions = parseCSV(file.buffer);
+    } else if (ext.endsWith('.xlsx') || ext.endsWith('.xls')) {
+      return res.status(400).json({ error: 'Excel files: please export as CSV from your bank and re-upload.' });
+    } else {
+      // Try CSV parsing as fallback
+      transactions = parseCSV(file.buffer);
+    }
+
+    if (transactions.length === 0) {
+      return res.status(400).json({
+        error: 'Could not extract debit transactions. Make sure the statement includes debit/withdrawal amounts with Dr labels or a Debit column.',
+      });
+    }
+
+    const withRoundUps = calculateRoundUps(transactions, rule);
+    const totalRoundUp = withRoundUps.reduce((s, t) => s + t.roundUp, 0);
+    const totalSpent = transactions.reduce((s, t) => s + t.amount, 0);
+    const avgRoundUp = withRoundUps.length > 0 ? totalRoundUp / withRoundUps.length : 0;
+
+    // Distribution buckets
+    const buckets = { '1-5': 0, '6-10': 0, '11-25': 0, '26-50': 0, '51+': 0 };
+    for (const t of withRoundUps) {
+      if (t.roundUp <= 5) buckets['1-5']++;
+      else if (t.roundUp <= 10) buckets['6-10']++;
+      else if (t.roundUp <= 25) buckets['11-25']++;
+      else if (t.roundUp <= 50) buckets['26-50']++;
+      else buckets['51+']++;
+    }
+
+    res.json({
+      totalTransactions: transactions.length,
+      transactionsWithRoundUp: withRoundUps.length,
+      totalSpent: Math.round(totalSpent),
+      totalRoundUp: Math.round(totalRoundUp * 100) / 100,
+      avgRoundUp: Math.round(avgRoundUp * 100) / 100,
+      projectedMonthly: Math.round(totalRoundUp),
+      projectedYearly: Math.round(totalRoundUp * 12),
+      buckets,
+      topTransactions: withRoundUps
+        .sort((a, b) => b.roundUp - a.roundUp)
+        .slice(0, 10),
+      rule: parseInt(rule),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to process file: ' + err.message });
+  }
+});
+
+if (require.main === module) {
+  const PORT = 3456;
+  app.listen(PORT, () => console.log(`Round-up calculator running at http://localhost:${PORT}`));
+}
+
+module.exports = app;

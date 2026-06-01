@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Round-Up Calculator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f13;
+      color: #e8e8f0;
+      min-height: 100vh;
+      padding: 32px 16px;
+    }
+
+    .container { max-width: 760px; margin: 0 auto; }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      background: linear-gradient(135deg, #7c6ff7, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+
+    .upload-card {
+      background: #1a1a24;
+      border: 1.5px solid #2a2a3a;
+      border-radius: 16px;
+      padding: 32px;
+      margin-bottom: 24px;
+    }
+
+    .upload-zone {
+      border: 2px dashed #3a3a52;
+      border-radius: 12px;
+      padding: 48px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 24px;
+    }
+
+    .upload-zone:hover, .upload-zone.drag-over {
+      border-color: #7c6ff7;
+      background: #1e1e2e;
+    }
+
+    .upload-icon { font-size: 40px; margin-bottom: 12px; }
+    .upload-zone p { color: #888; font-size: 14px; margin-top: 8px; }
+    .upload-zone strong { color: #ccc; }
+
+    #fileInput { display: none; }
+    #fileName {
+      display: none;
+      background: #252535;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #a0a0c0;
+      margin-bottom: 16px;
+    }
+
+    .rule-section label {
+      display: block;
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .rule-options {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .rule-btn {
+      flex: 1;
+      padding: 12px;
+      border: 1.5px solid #2a2a3a;
+      border-radius: 10px;
+      background: #252535;
+      color: #ccc;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: center;
+    }
+
+    .rule-btn:hover { border-color: #7c6ff7; color: #a78bfa; }
+    .rule-btn.active {
+      border-color: #7c6ff7;
+      background: #2a2040;
+      color: #a78bfa;
+      font-weight: 600;
+    }
+
+    .rule-btn small { display: block; font-size: 11px; color: #666; margin-top: 3px; }
+    .rule-btn.active small { color: #7c6ff7; }
+
+    .analyze-btn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #7c6ff7, #a78bfa);
+      border: none;
+      border-radius: 10px;
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    .analyze-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .analyze-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    .error-box {
+      display: none;
+      background: #2a1a1a;
+      border: 1px solid #5a2a2a;
+      border-radius: 10px;
+      padding: 14px 16px;
+      color: #ff8080;
+      font-size: 14px;
+      margin-top: 16px;
+    }
+
+    .results { display: none; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    @media (min-width: 540px) {
+      .stats-grid { grid-template-columns: repeat(4, 1fr); }
+    }
+
+    .stat-card {
+      background: #1a1a24;
+      border: 1.5px solid #2a2a3a;
+      border-radius: 14px;
+      padding: 18px 16px;
+      text-align: center;
+    }
+
+    .stat-card.highlight {
+      border-color: #7c6ff7;
+      background: linear-gradient(135deg, #1e1a30, #1a1a24);
+    }
+
+    .stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: #e8e8f0;
+      margin-bottom: 4px;
+    }
+
+    .stat-card.highlight .stat-value { color: #a78bfa; }
+    .stat-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
+
+    .section-card {
+      background: #1a1a24;
+      border: 1.5px solid #2a2a3a;
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 18px;
+    }
+
+    .projection-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 0;
+      border-bottom: 1px solid #222232;
+    }
+
+    .projection-row:last-child { border-bottom: none; }
+    .proj-label { color: #aaa; font-size: 14px; }
+    .proj-value { font-size: 18px; font-weight: 700; color: #7c6ff7; }
+
+    .dist-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .dist-label { width: 50px; font-size: 12px; color: #888; flex-shrink: 0; }
+
+    .dist-bar-wrap {
+      flex: 1;
+      background: #252535;
+      border-radius: 4px;
+      height: 8px;
+      overflow: hidden;
+    }
+
+    .dist-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #7c6ff7, #a78bfa);
+      border-radius: 4px;
+      transition: width 0.6s ease;
+    }
+
+    .dist-count { font-size: 12px; color: #666; width: 30px; text-align: right; flex-shrink: 0; }
+
+    .tx-table { width: 100%; border-collapse: collapse; }
+    .tx-table th {
+      text-align: left;
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0 0 12px 0;
+      border-bottom: 1px solid #222232;
+    }
+
+    .tx-table th:last-child, .tx-table td:last-child { text-align: right; }
+
+    .tx-table td {
+      padding: 10px 0;
+      font-size: 13px;
+      color: #ccc;
+      border-bottom: 1px solid #1e1e2e;
+      vertical-align: top;
+    }
+
+    .tx-table tr:last-child td { border-bottom: none; }
+    .tx-desc { max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tx-amount { color: #aaa; }
+    .tx-roundup { color: #7c6ff7; font-weight: 600; }
+
+    .insight-box {
+      background: linear-gradient(135deg, #1e1a30, #1a1e30);
+      border: 1px solid #3a3060;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #c0b8e8;
+    }
+
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 40px;
+      color: #666;
+      font-size: 14px;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #2a2a3a;
+      border-top-color: #7c6ff7;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Round-Up Calculator</h1>
+    <p class="subtitle">Upload your bank statement. See how much you'd have invested automatically.</p>
+
+    <div class="upload-card">
+      <div class="upload-zone" id="uploadZone">
+        <div class="upload-icon">📄</div>
+        <strong>Drop your bank statement here</strong>
+        <p>or click to browse — PDF or CSV</p>
+        <p style="margin-top:8px; font-size:12px;">Your file never leaves your computer</p>
+      </div>
+      <div id="fileName"></div>
+
+      <div class="rule-section">
+        <label>Round-up rule</label>
+        <div class="rule-options">
+          <div class="rule-btn active" data-rule="auto">
+            Auto
+            <small>&lt;₹100 → ₹10 · &lt;₹1k → ₹50 · else ₹100</small>
+          </div>
+          <div class="rule-btn" data-rule="10">
+            ₹10
+            <small>save ₹1–₹10 per txn</small>
+          </div>
+          <div class="rule-btn" data-rule="50">
+            ₹50
+            <small>save ₹1–₹50 per txn</small>
+          </div>
+          <div class="rule-btn" data-rule="100">
+            ₹100
+            <small>save ₹1–₹100 per txn</small>
+          </div>
+        </div>
+      </div>
+
+      <button class="analyze-btn" id="analyzeBtn" disabled>Analyze Statement</button>
+      <div class="error-box" id="errorBox"></div>
+    </div>
+
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      Parsing your statement...
+    </div>
+
+    <div class="results" id="results">
+      <div class="insight-box" id="insightBox"></div>
+
+      <div class="stats-grid">
+        <div class="stat-card highlight">
+          <div class="stat-value" id="statTotalRoundup">—</div>
+          <div class="stat-label">Total Saved</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statTransactions">—</div>
+          <div class="stat-label">Transactions</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statAvgRoundup">—</div>
+          <div class="stat-label">Avg Saved per Txn</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statSpent">—</div>
+          <div class="stat-label">Total Spent</div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-title">Projections</div>
+        <div class="projection-row">
+          <span class="proj-label">This month (statement period)</span>
+          <span class="proj-value" id="projMonthly">—</span>
+        </div>
+        <div class="projection-row">
+          <span class="proj-label">If this was every month → yearly</span>
+          <span class="proj-value" id="projYearly">—</span>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-title">Amount Saved Distribution</div>
+        <div id="distChart"></div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-title">Top Transactions by Amount Saved</div>
+        <table class="tx-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Spent</th>
+              <th>Saved</th>
+            </tr>
+          </thead>
+          <tbody id="txBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput" accept=".pdf,.csv,.xlsx,.xls" />
+
+  <script>
+    let selectedFile = null;
+    let selectedRule = 'auto';
+
+    const uploadZone = document.getElementById('uploadZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const errorBox = document.getElementById('errorBox');
+    const loading = document.getElementById('loading');
+    const results = document.getElementById('results');
+
+    uploadZone.addEventListener('click', () => fileInput.click());
+
+    uploadZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      uploadZone.classList.add('drag-over');
+    });
+
+    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+
+    uploadZone.addEventListener('drop', e => {
+      e.preventDefault();
+      uploadZone.classList.remove('drag-over');
+      const f = e.dataTransfer.files[0];
+      if (f) setFile(f);
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) setFile(fileInput.files[0]);
+    });
+
+    function setFile(f) {
+      selectedFile = f;
+      fileName.style.display = 'block';
+      fileName.textContent = `📎 ${f.name} (${(f.size / 1024).toFixed(1)} KB)`;
+      analyzeBtn.disabled = false;
+      errorBox.style.display = 'none';
+    }
+
+    document.querySelectorAll('.rule-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.rule-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedRule = btn.dataset.rule;
+      });
+    });
+
+    analyzeBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+
+      errorBox.style.display = 'none';
+      results.style.display = 'none';
+      loading.style.display = 'block';
+      analyzeBtn.disabled = true;
+
+      const formData = new FormData();
+      formData.append('statement', selectedFile);
+      formData.append('rule', selectedRule);
+
+      try {
+        const res = await fetch('/analyze', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (!res.ok) {
+          showError(data.error || 'Something went wrong.');
+          return;
+        }
+
+        renderResults(data);
+      } catch (err) {
+        showError('Network error. Make sure the server is running.');
+      } finally {
+        loading.style.display = 'none';
+        analyzeBtn.disabled = false;
+      }
+    });
+
+    function showError(msg) {
+      loading.style.display = 'none';
+      errorBox.style.display = 'block';
+      errorBox.textContent = '⚠️ ' + msg;
+    }
+
+    function fmt(n) {
+      return '₹' + n.toLocaleString('en-IN');
+    }
+
+    function renderResults(d) {
+      results.style.display = 'block';
+
+      const pct = d.totalSpent > 0 ? ((d.totalRoundUp / d.totalSpent) * 100).toFixed(2) : 0;
+
+      document.getElementById('insightBox').innerHTML =
+        `Out of <strong>${fmt(d.totalSpent)}</strong> spent across <strong>${d.totalTransactions} transactions</strong>, ` +
+        `you would have automatically saved <strong>${fmt(d.totalRoundUp)}</strong> — ` +
+        `that's <strong>${pct}%</strong> of your spending, with zero effort. ` +
+        `At this rate, that's <strong>${fmt(d.projectedYearly)}/year</strong>.`;
+
+      document.getElementById('statTotalRoundup').textContent = fmt(d.totalRoundUp);
+      document.getElementById('statTransactions').textContent = d.transactionsWithRoundUp;
+      document.getElementById('statAvgRoundup').textContent = fmt(d.avgRoundUp);
+      document.getElementById('statSpent').textContent = fmt(d.totalSpent);
+      document.getElementById('projMonthly').textContent = fmt(d.projectedMonthly);
+      document.getElementById('projYearly').textContent = fmt(d.projectedYearly);
+
+      // Distribution chart
+      const maxCount = Math.max(...Object.values(d.buckets), 1);
+      const distEl = document.getElementById('distChart');
+      distEl.innerHTML = Object.entries(d.buckets).map(([label, count]) => `
+        <div class="dist-row">
+          <span class="dist-label">₹${label}</span>
+          <div class="dist-bar-wrap">
+            <div class="dist-bar" style="width: ${(count / maxCount * 100).toFixed(1)}%"></div>
+          </div>
+          <span class="dist-count">${count}</span>
+        </div>
+      `).join('');
+
+      // Top transactions
+      const tbody = document.getElementById('txBody');
+      tbody.innerHTML = d.topTransactions.map(t => `
+        <tr>
+          <td class="tx-desc" title="${t.line}">${t.line || '—'}</td>
+          <td class="tx-amount">${fmt(Math.round(t.amount))}</td>
+          <td class="tx-roundup">${fmt(t.roundUp)}${t.interval ? `<span style="font-size:10px;color:#555;margin-left:4px">÷${t.interval}</span>` : ''}</td>
+        </tr>
+      `).join('');
+    }
+  </script>
+</body>
+</html>
